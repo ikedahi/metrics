@@ -5,6 +5,9 @@
  *
  * http://gee.cs.oswego.edu/cgi-bin/viewcvs.cgi/jsr166/src/jsr166e/LongAdder.java?revision=1.14&view=markup
  */
+/*
+ * Edited to remove usage of sun.misc.Unsafe.
+ */
 
 package io.dropwizard.metrics;
 
