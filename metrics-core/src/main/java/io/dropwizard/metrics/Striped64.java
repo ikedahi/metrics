@@ -13,7 +13,9 @@ package io.dropwizard.metrics;
 
 import io.dropwizard.metrics.Striped64;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
 // CHECKSTYLE:OFF
@@ -103,6 +105,14 @@ abstract class Striped64 extends Number {
             value = x;
         }
 
+        final long get() {
+            return valueUpdater.get(this);
+        }
+
+        final void set(long val) {
+            valueUpdater.set(this, val);
+        }
+
         final boolean cas(long cmp, long val) {
             return valueUpdater.compareAndSet(this, cmp, val);
         }
@@ -154,33 +164,19 @@ abstract class Striped64 extends Number {
 
     /**
      * Base value, used mainly when there is no contention, but also as a fallback during table
-     * initialization races. Updated via CAS.
+     * initialization races.
      */
-    transient volatile long base;
+    transient final AtomicLong baseRef = new AtomicLong();
 
     /**
-     * Spinlock (locked via CAS) used when resizing and/or creating Cells.
+     * Spinlock used when resizing and/or creating Cells.
      */
-    transient volatile int busy;
+    transient final AtomicBoolean busyRef = new AtomicBoolean();
 
     /**
      * Package-private default constructor
      */
     Striped64() {
-    }
-
-    /**
-     * CASes the base field.
-     */
-    final boolean casBase(long cmp, long val) {
-        return baseUpdater.compareAndSet(this, cmp, val);
-    }
-
-    /**
-     * CASes the busy field from 0 to 1 to acquire lock.
-     */
-    final boolean casBusy() {
-        return busyUpdater.compareAndSet(this, 0, 1);
     }
 
     /**
@@ -212,9 +208,9 @@ abstract class Striped64 extends Number {
             long v;
             if ((as = cells) != null && (n = as.length) > 0) {
                 if ((a = as[(n - 1) & h]) == null) {
-                    if (busy == 0) {            // Try to attach new Cell
+                    if (!busyRef.get()) {       // Try to attach new Cell
                         Cell r = new Cell(x);   // Optimistically create
-                        if (busy == 0 && casBusy()) {
+                        if (!busyRef.get() && busyRef.compareAndSet(false, true)) {
                             boolean created = false;
                             try {               // Recheck under lock
                                 Cell[] rs;
@@ -226,7 +222,7 @@ abstract class Striped64 extends Number {
                                     created = true;
                                 }
                             } finally {
-                                busy = 0;
+                                busyRef.set(false);
                             }
                             if (created)
                                 break;
@@ -236,13 +232,13 @@ abstract class Striped64 extends Number {
                     collide = false;
                 } else if (!wasUncontended)       // CAS already known to fail
                     wasUncontended = true;      // Continue after rehash
-                else if (a.cas(v = a.value, fn(v, x)))
+                else if (a.cas(v = a.get(), fn(v, x)))
                     break;
                 else if (n >= NCPU || cells != as)
                     collide = false;            // At max size or stale
                 else if (!collide)
                     collide = true;
-                else if (busy == 0 && casBusy()) {
+                else if (!busyRef.get() && busyRef.compareAndSet(false, true)) {
                     try {
                         if (cells == as) {      // Expand table unless stale
                             Cell[] rs = new Cell[n << 1];
@@ -251,7 +247,7 @@ abstract class Striped64 extends Number {
                             cells = rs;
                         }
                     } finally {
-                        busy = 0;
+                        busyRef.set(false);
                     }
                     collide = false;
                     continue;                   // Retry with expanded table
@@ -259,7 +255,7 @@ abstract class Striped64 extends Number {
                 h ^= h << 13;                   // Rehash
                 h ^= h >>> 17;
                 h ^= h << 5;
-            } else if (busy == 0 && cells == as && casBusy()) {
+            } else if (!busyRef.get() && cells == as && busyRef.compareAndSet(false, true)) {
                 boolean init = false;
                 try {                           // Initialize table
                     if (cells == as) {
@@ -269,11 +265,11 @@ abstract class Striped64 extends Number {
                         init = true;
                     }
                 } finally {
-                    busy = 0;
+                    busyRef.set(false);
                 }
                 if (init)
                     break;
-            } else if (casBase(v = base, fn(v, x)))
+            } else if (baseRef.compareAndSet(v = baseRef.get(), fn(v, x)))
                 break;                          // Fall back on using base
         }
         hc.code = h;                            // Record index for next time
@@ -285,21 +281,15 @@ abstract class Striped64 extends Number {
      */
     final void internalReset(long initialValue) {
         Cell[] as = cells;
-        base = initialValue;
+        baseRef.set(initialValue);
         if (as != null) {
             int n = as.length;
             for (int i = 0; i < n; ++i) {
                 Cell a = as[i];
                 if (a != null)
-                    a.value = initialValue;
+                    a.set(initialValue);
             }
         }
     }
-
-    private static final AtomicLongFieldUpdater<Striped64> baseUpdater =
-            AtomicLongFieldUpdater.newUpdater(Striped64.class, "base");
-
-    private static final AtomicIntegerFieldUpdater<Striped64> busyUpdater =
-            AtomicIntegerFieldUpdater.newUpdater(Striped64.class, "busy");
 }
 // CHECKSTYLE:ON

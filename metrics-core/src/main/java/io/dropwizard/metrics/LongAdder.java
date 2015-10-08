@@ -64,12 +64,12 @@ class LongAdder extends Striped64 implements Serializable {
         HashCode hc;
         Cell a;
         int n;
-        if ((as = cells) != null || !casBase(b = base, b + x)) {
+        if ((as = cells) != null || !baseRef.compareAndSet(b = baseRef.get(), b + x)) {
             boolean uncontended = true;
             int h = (hc = threadHashCode.get()).code;
             if (as == null || (n = as.length) < 1 ||
                     (a = as[(n - 1) & h]) == null ||
-                    !(uncontended = a.cas(v = a.value, v + x)))
+                    !(uncontended = a.cas(v = a.get(), v + x)))
                 retryUpdate(x, hc, uncontended);
         }
     }
@@ -96,14 +96,14 @@ class LongAdder extends Striped64 implements Serializable {
      * @return the sum
      */
     public long sum() {
-        long sum = base;
+        long sum = baseRef.get();
         Cell[] as = cells;
         if (as != null) {
             int n = as.length;
             for (int i = 0; i < n; ++i) {
                 Cell a = as[i];
                 if (a != null)
-                    sum += a.value;
+                    sum += a.get();
             }
         }
         return sum;
@@ -128,16 +128,16 @@ class LongAdder extends Striped64 implements Serializable {
      * @return the sum
      */
     public long sumThenReset() {
-        long sum = base;
+        long sum = baseRef.get();
         Cell[] as = cells;
-        base = 0L;
+        baseRef.set(0L);
         if (as != null) {
             int n = as.length;
             for (int i = 0; i < n; ++i) {
                 Cell a = as[i];
                 if (a != null) {
-                    sum += a.value;
-                    a.value = 0L;
+                    sum += a.get();
+                    a.set(0L);
                 }
             }
         }
@@ -197,9 +197,9 @@ class LongAdder extends Striped64 implements Serializable {
     private void readObject(java.io.ObjectInputStream s)
             throws java.io.IOException, ClassNotFoundException {
         s.defaultReadObject();
-        busy = 0;
+        busyRef.set(false);
         cells = null;
-        base = s.readLong();
+        baseRef.set(s.readLong());
     }
 }
 // CHECKSTYLE:ON
