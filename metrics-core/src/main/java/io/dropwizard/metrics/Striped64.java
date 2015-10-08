@@ -104,7 +104,7 @@ abstract class Striped64 extends Number {
         }
 
         final boolean cas(long cmp, long val) {
-            return valueUpdater.compareAndSet(this, cmp, value);
+            return valueUpdater.compareAndSet(this, cmp, val);
         }
 
         private static final AtomicLongFieldUpdater<Cell> valueUpdater =
